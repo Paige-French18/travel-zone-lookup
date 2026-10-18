@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BW Henderson Electrical — Travel Zone Lookup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background:#f0f4f8; color:#1a2e44; min-height:100vh; }
+
+  .topbar {
+    background:#1a2e44; color:white; padding:12px 20px;
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;
+  }
+  .topbar h1 { font-size:16px; font-weight:700; }
+  .topbar .depot { font-size:11px; opacity:0.8; }
+
+  .search-panel {
+    background:white; padding:16px 20px; border-bottom:2px solid #e2e8f0;
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  }
+  .search-panel input {
+    flex:1; min-width:220px; padding:10px 14px; font-size:14px;
+    border:2px solid #cbd5e1; border-radius:8px; outline:none;
+    transition: border-color .2s;
+  }
+  .search-panel input:focus { border-color:#1a2e44; }
+  .search-panel button {
+    padding:10px 20px; background:#1a2e44; color:white; border:none;
+    border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap;
+    transition: background .2s;
+  }
+  .search-panel button:hover { background:#2d4a6e; }
+  .search-panel button:disabled { background:#94a3b8; cursor:not-allowed; }
+
+  .result-bar {
+    display:none; padding:14px 20px; align-items:center; gap:16px; flex-wrap:wrap;
+    border-bottom:3px solid #e2e8f0; background:white;
+  }
+  .result-badge {
+    padding:8px 18px; border-radius:24px; color:white; font-size:15px; font-weight:800;
+    white-space:nowrap;
+  }
+  .result-detail { font-size:13px; line-height:1.6; }
+  .result-detail strong { font-size:17px; }
+  .result-addr { font-size:12px; color:#64748b; margin-top:2px; }
+  .result-warning {
+    font-size:11px; background:#fffbeb; border:1px solid #fde68a;
+    padding:4px 10px; border-radius:6px; color:#92400e; margin-top:4px; display:inline-block;
+  }
+
+  #map { width:100%; height:calc(100vh - 220px); min-height:320px; }
+
+  .legend {
+    position:absolute; bottom:20px; left:10px; z-index:1000; background:white;
+    border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; font-size:11px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.15); min-width:190px; max-width:340px;
+  }
+  .legend-title { font-weight:700; font-size:12px; margin-bottom:6px; color:#1a2e44; }
+  .legend-row { display:flex; align-items:center; gap:8px; margin:3px 0; }
+  .legend-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+  .legend-note { font-size:10px; color:#94a3b8; margin-top:6px; line-height:1.4; }
+
+  .error-msg { color:#dc2626; font-size:13px; padding:4px 0; }
+
+  @media print { .search-panel, .topbar button { display:none; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>⚡ BW Henderson Electrical — Travel Zone Lookup</h1>
+    <div class="depot">Depot: 82a Spartan Road, Takanini · Zones based on driving distance</div>
+  </div>
+  <div class="depot" style="text-align:right;">All charges excl. GST · Rates effective July 2026</div>
+</div>
+
+<div class="search-panel">
+  <input type="text" id="addrInput" placeholder="Type an address, suburb or postcode… e.g. 12 Queen St, Auckland"
+    onkeydown="if(event.key==='Enter') lookupAddress()">
+  <button id="lookupBtn" onclick="lookupAddress()">🔍 Find Zone</button>
+  <span id="errMsg" class="error-msg"></span>
+</div>
+
+<div class="result-bar" id="resultBar">
+  <div class="result-badge" id="resultBadge"></div>
+  <div>
+    <div class="result-detail" id="resultDetail"></div>
+    <div class="result-addr" id="resultAddr"></div>
+    <div id="resultWarning"></div>
+  </div>
+</div>
+
+<div style="position:relative;">
+  <div id="map"></div>
+  <div class="legend">
+    <div class="legend-title">BW Henderson Electrical Zones</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#16a34a;"></div><span><b>Vehicle Charge</b> 0–10 km — $30</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#2563eb;"></div><span><b>Vehicle Charge*</b> 10–20 km — $45</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#d97706;"></div><span><b>Vehicle Charge**</b> 20–30 km — $60</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#dc2626;"></div><span><b>Vehicle Charge***</b> 30–40 km — $80</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#6d28d9;"></div><span><b>Beyond</b> 40 km+ — $3.50/km</span></div>
+    <div class="legend-note">Ring sizes are calibrated to real driving distance (French → Wiri = 11 km actual route), not straight-line distance. The price shown after a search always uses the real driving route, regardless of ring position.</div>
+  </div>
+</div>
+
+<script>
+  const DEPOT = { lat: -37.0355, lng: 174.9145, name: 'BW Henderson Electrical — Takanini' };
+
+  // Circle radii are scaled by a circuity factor (driving km ÷ straight-line km)
+  // calibrated from a known real route: French Electrical depot -> Wiri = 11 km driving,
+  // ~8.49 km straight-line, giving a factor of ~1.296. Applied to all zone boundaries so
+  // the rings sit closer to where real driving distance actually crosses each threshold.
+  const ZONES = [
+    { key:'metro',  label:'Vehicle Charge',    minKm:0,  maxKm:10,       color:'#16a34a', r:7718,  fill:0.28, dash:null,   priceLabel:'$30.00 + GST' },
+    { key:'local',  label:'Vehicle Charge*',   minKm:10, maxKm:20,       color:'#2563eb', r:15435, fill:0.16, dash:null,   priceLabel:'$45.00 + GST' },
+    { key:'zone2',  label:'Vehicle Charge**',  minKm:20, maxKm:30,       color:'#d97706', r:23153, fill:0.13, dash:null,   priceLabel:'$60.00 + GST' },
+    { key:'zone3',  label:'Vehicle Charge***', minKm:30, maxKm:40,       color:'#dc2626', r:30871, fill:0.10, dash:null,   priceLabel:'$80.00 + GST' },
+    { key:'beyond', label:'Beyond 40km+',      minKm:40, maxKm:Infinity, color:'#6d28d9', r:38589, fill:0,    dash:'6,6',  priceLabel:'$3.50/km + GST' },
+  ];
+
+  const map = L.map('map').setView([DEPOT.lat, DEPOT.lng], 9);
+
+  // Base map with automatic fallback: if one free map service refuses the page
+  // (e.g. because it's opened as a local file), the next one is tried automatically.
+  const BASEMAPS = [
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      opts: { attribution: 'Tiles © Esri — Esri, HERE, Garmin, OpenStreetMap contributors', maxZoom: 19 } },
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      opts: { attribution: 'Tiles © Esri', maxZoom: 19 } },
+    { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      opts: { attribution: '© OpenStreetMap contributors', maxZoom: 19 } },
+  ];
+  let baseIdx = 0, baseLayer = null, tileErrors = 0;
+  function useBasemap(i) {
+    if (baseLayer) map.removeLayer(baseLayer);
+    baseIdx = i; tileErrors = 0;
+    baseLayer = L.tileLayer(BASEMAPS[i].url, BASEMAPS[i].opts);
+    baseLayer.on('tileerror', () => {
+      tileErrors++;
+      if (tileErrors >= 4 && baseIdx < BASEMAPS.length - 1) useBasemap(baseIdx + 1);
+    });
+    baseLayer.addTo(map);
+    baseLayer.bringToBack();
+  }
+  useBasemap(0);
+
+  [...ZONES].reverse().forEach(z => {
+    L.circle([DEPOT.lat, DEPOT.lng], {
+      radius: z.r, color: z.color, weight: 2,
+      dashArray: z.dash, fillColor: z.color, fillOpacity: z.fill
+    }).bindPopup(`<b>${z.label}</b><br>${z.minKm}–${z.maxKm === Infinity ? '∞' : z.maxKm} km driving (calibrated ring)<br>${z.priceLabel}`).addTo(map);
+  });
+
+  const depotIcon = L.divIcon({
+    html: '<div style="width:16px;height:16px;background:#1a2e44;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.5);"></div>',
+    iconSize:[16,16], iconAnchor:[8,8], className:''
+  });
+  L.marker([DEPOT.lat, DEPOT.lng], { icon: depotIcon }).addTo(map)
+    .bindPopup(`<strong>BW Henderson Electrical</strong><br>82a Spartan Road, Takanini<br>Depot`)
+    .openPopup();
+
+  let customerMarker = null;
+
+  function getZone(km) {
+    return ZONES.find(z => km >= z.minKm && km < z.maxKm) || ZONES[ZONES.length - 1];
+  }
+
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // Address search: tries Photon first (works from a local file), then Nominatim as a backup.
+  async function geocode(input) {
+    try {
+      const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(input + ', New Zealand')}&limit=1&lang=en&bbox=165.8,-47.5,179.0,-34.0`);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.features && d.features.length) {
+          const f = d.features[0], p = f.properties || {};
+          const line1 = [p.housenumber, p.street].filter(Boolean).join(' ');
+          const label = [p.name && p.name !== p.street ? p.name : null, line1 || null,
+                         p.district, p.city, p.postcode, p.country].filter(Boolean).join(', ');
+          return { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: label || input };
+        }
+      }
+    } catch (e) { console.warn('Photon failed', e); }
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(input + ', New Zealand')}&format=json&limit=1&countrycodes=nz`);
+      if (r.ok) {
+        const d = await r.json();
+        if (d.length) return { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon), label: d[0].display_name };
+      }
+    } catch (e) { console.warn('Nominatim failed', e); }
+    return null;
+  }
+
+  async function lookupAddress() {
+    const input = document.getElementById('addrInput').value.trim();
+    if (!input) return;
+    const btn = document.getElementById('lookupBtn');
+    const err = document.getElementById('errMsg');
+    err.textContent = '';
+    btn.disabled = true;
+    btn.textContent = '⏳ Searching…';
+
+    try {
+      const geo = await geocode(input);
+      if (!geo) {
+        err.textContent = '❌ Address not found — try adding suburb or city.';
+        return;
+      }
+      const lat = geo.lat, lng = geo.lng, label = geo.label;
+
+      let km, distanceLabel;
+      try {
+        const osrmRes = await fetch(
+          `https://router.project-osrm.org/route/v1/driving/${DEPOT.lng},${DEPOT.lat};${lng},${lat}?overview=false`
+        );
+        const osrmData = await osrmRes.json();
+        if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length) {
+          km = osrmData.routes[0].distance / 1000;
+          distanceLabel = 'driving distance';
+        } else {
+          throw new Error('no route');
+        }
+      } catch (e) {
+        km = haversineKm(DEPOT.lat, DEPOT.lng, lat, lng);
+        distanceLabel = 'straight-line estimate (driving lookup unavailable)';
+      }
+
+      const zone = getZone(km);
+      const kmRounded = km.toFixed(1);
+
+      const bar = document.getElementById('resultBar');
+      bar.style.display = 'flex';
+      const badge = document.getElementById('resultBadge');
+      badge.style.background = zone.color;
+      badge.textContent = zone.label;
+      document.getElementById('resultDetail').innerHTML =
+        `<strong>${zone.priceLabel}</strong><br>${kmRounded} km ${distanceLabel} from depot`;
+      document.getElementById('resultAddr').textContent = label;
+
+      let warn = '';
+      if (km >= 9 && km < 11) warn = '⚠️ Near zone boundary — confirm before quoting.';
+      if (km >= 19 && km < 21) warn = '⚠️ Near zone boundary — confirm before quoting.';
+      if (km >= 29 && km < 31) warn = '⚠️ Near zone boundary — confirm before quoting.';
+      if (km >= 39 && km < 41) warn = '⚠️ Near zone boundary — confirm before quoting.';
+      if (zone.key === 'beyond') {
+        warn = `💰 Estimated charge: $${(km * 3.50).toFixed(2)} + GST (${kmRounded} km × $3.50)`;
+      }
+      document.getElementById('resultWarning').innerHTML = warn ? `<span class="result-warning">${warn}</span>` : '';
+
+      if (customerMarker) map.removeLayer(customerMarker);
+      customerMarker = L.marker([lat, lng]).addTo(map).bindPopup(label).openPopup();
+      map.fitBounds(L.latLngBounds([DEPOT.lat, DEPOT.lng], [lat, lng]), { padding: [60, 60] });
+
+    } catch (e) {
+      err.textContent = '❌ Error looking up address. Check your connection and try again.';
+      console.error(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔍 Find Zone';
+    }
+  }
+</script>
+</body>
+</html>
