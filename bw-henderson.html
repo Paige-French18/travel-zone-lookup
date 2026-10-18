@@ -279,11 +279,12 @@
   // ---------- Suggestion list ----------
   const inputEl = document.getElementById('addrInput');
   const listEl = document.getElementById('suggest');
-  let current = [], activeIdx = -1, typingTimer = null, searchSeq = 0;
+  let current = [], activeIdx = -1, typingTimer = null, searchSeq = 0, blurTimer = null;
 
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
   function showList(results, heading) {
+    clearTimeout(blurTimer);  // a pending close from clicking Find Zone must not hide this list
     current = results; activeIdx = -1;
     if (!results.length) { listEl.hidden = true; return; }
     listEl.innerHTML = (heading ? `<li class="suggest-head">${esc(heading)}</li>` : '') +
@@ -329,7 +330,7 @@
       else lookupAddress();
     }
   });
-  inputEl.addEventListener('blur', () => setTimeout(hideList, 150));
+  inputEl.addEventListener('blur', () => { blurTimer = setTimeout(hideList, 150); });
 
   // "Find Zone": go straight to the result only when the street name and number match exactly;
   // otherwise make staff pick from the list so a wrong town can't slip through.
